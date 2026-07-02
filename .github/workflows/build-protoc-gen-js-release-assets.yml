@@ -1,0 +1,157 @@
+name: Build protoc-gen-js release assets
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing draft release tag to upload assets to
+        required: true
+        type: string
+      source_ref:
+        description: Git ref to build from (branch, tag, or SHA)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: protoc-gen-js-release-${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.action == 'published' }}
+    runs-on: ubuntu-latest
+    env:
+      PROTOC_VERSION: "35.1"
+      PROTOC_PLATFORM: linux-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.source_ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install Protoc
+        run: |
+          curl --header 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+            -L https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-${PROTOC_PLATFORM}.zip \
+            --output protoc-release.zip
+          unzip protoc-release.zip -d protoc-release
+          rm protoc-release.zip
+        env:
+          PROTOC: protoc-release/bin/protoc
+          PROTOC_INC: protoc-release/include
+
+      - run: npm ci
+      - run: npm test
+        env:
+          PROTOC: protoc-release/bin/protoc
+          PROTOC_INC: protoc-release/include
+
+  build-linux-amd64:
+    needs: test
+    runs-on: ubuntu-22.04
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.release_tag }}
+      SOURCE_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.source_ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+
+      - uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build protoc-gen-js
+        run: bazel build //generator:protoc-gen-js
+
+      - name: Verify protoc-gen-js binary
+        run: file bazel-bin/generator/protoc-gen-js
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp bazel-bin/generator/protoc-gen-js dist/protoc-gen-js
+          tar -C dist -czf "protoc-gen-js-${RELEASE_TAG}-linux-amd64.tar.gz" protoc-gen-js
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: protoc-gen-js-linux-amd64
+          path: protoc-gen-js-${{ env.RELEASE_TAG }}-linux-amd64.tar.gz
+          if-no-files-found: error
+
+  build-darwin-arm64:
+    needs: test
+    runs-on: macos-14
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.release_tag }}
+      SOURCE_REF: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.source_ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+
+      - uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build protoc-gen-js
+        run: bazel build --cpu=darwin_arm64 //generator:protoc-gen-js
+
+      - name: Verify protoc-gen-js binary
+        run: file bazel-bin/generator/protoc-gen-js
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp bazel-bin/generator/protoc-gen-js dist/protoc-gen-js
+          tar -C dist -czf "protoc-gen-js-${RELEASE_TAG}-darwin-arm64.tar.gz" protoc-gen-js
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: protoc-gen-js-darwin-arm64
+          path: protoc-gen-js-${{ env.RELEASE_TAG }}-darwin-arm64.tar.gz
+          if-no-files-found: error
+
+  upload-assets:
+    runs-on: ubuntu-22.04
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.release_tag }}
+    needs:
+      - build-linux-amd64
+      - build-darwin-arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download workflow artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          cp release-assets/protoc-gen-js-linux-amd64/*.tar.gz out/
+          cp release-assets/protoc-gen-js-darwin-arm64/*.tar.gz out/
+          (cd out && shasum -a 256 *.tar.gz > SHA256SUMS)
+
+      - name: Upload assets to draft release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${RELEASE_TAG}" out/*.tar.gz out/SHA256SUMS --clobber
