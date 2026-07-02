@@ -3038,7 +3038,7 @@ void Generator::GenerateRepeatedMessageHelperMethods(
       "\n",
       "index", JSFieldIndex(field), "oneofgroup",
       (InRealOneof(field) ? (", " + JSOneofArray(options, field)) : ""), "ctor",
-      GetMessagePath(options, field->message_type()));
+      SubmessageTypeRef(options, field));
 }
 
 void Generator::GenerateClassExtensionFieldInfo(const GeneratorOptions& options,
