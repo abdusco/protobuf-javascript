@@ -1967,6 +1967,65 @@ void Generator::FindRequiresForExtension(
   FindRequiresForField(options, field, required, forwards);
 }
 
+void Generator::FindReferencedFiles(
+    const GeneratorOptions& options, const Descriptor* desc,
+    const FileDescriptor* file,
+    std::set<std::string>* referenced_files) const {
+  for (int i = 0; i < desc->field_count(); i++) {
+    const FieldDescriptor* field = desc->field(i);
+    if (IgnoreField(field)) {
+      continue;
+    }
+    if (field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE &&
+        !IgnoreMessage(field->message_type())) {
+      const FileDescriptor* dep_file = field->message_type()->file();
+      if (dep_file != file) {
+        referenced_files->insert(std::string(dep_file->name()));
+      }
+    }
+  }
+  for (int i = 0; i < desc->extension_count(); i++) {
+    const FieldDescriptor* field = desc->extension(i);
+    if (IgnoreField(field)) {
+      continue;
+    }
+    if (field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE &&
+        !IgnoreMessage(field->message_type())) {
+      const FileDescriptor* dep_file = field->message_type()->file();
+      if (dep_file != file) {
+        referenced_files->insert(std::string(dep_file->name()));
+      }
+    }
+  }
+  for (int i = 0; i < desc->nested_type_count(); i++) {
+    FindReferencedFiles(options, desc->nested_type(i), file, referenced_files);
+  }
+}
+
+std::set<std::string> Generator::CollectExtendedFiles(
+    const GeneratorOptions& options, const FileDescriptor* file) const {
+  std::set<std::string> referenced_files;
+  for (int i = 0; i < file->dependency_count(); i++) {
+    referenced_files.insert(std::string(file->dependency(i)->name()));
+  }
+  for (int i = 0; i < file->message_type_count(); i++) {
+    FindReferencedFiles(options, file->message_type(i), file,
+                        &referenced_files);
+  }
+  for (int i = 0; i < file->extension_count(); i++) {
+    const FieldDescriptor* field = file->extension(i);
+    if (!IgnoreField(field) &&
+        field->cpp_type() == FieldDescriptor::CPPTYPE_MESSAGE &&
+        !IgnoreMessage(field->message_type())) {
+      const FileDescriptor* dep_file = field->message_type()->file();
+      if (dep_file != file) {
+        referenced_files.insert(std::string(dep_file->name()));
+      }
+    }
+  }
+  return referenced_files;
+}
+
 void Generator::GenerateTestOnly(const GeneratorOptions& options,
                                  io::Printer* printer) const {
   if (options.testonly) {
@@ -3663,30 +3722,45 @@ void Generator::GenerateFile(const GeneratorOptions& options,
     // Do not use global scope in strict mode
     if (options.import_style == GeneratorOptions::kImportCommonJsStrict) {
       printer->Print("var proto = {};\n\n");
+
+      std::set<std::string> referenced_files =
+          CollectExtendedFiles(options, file);
+      for (std::set<std::string>::iterator it = referenced_files.begin();
+           it != referenced_files.end(); ++it) {
+        printer->Print(
+            "var $alias$ = require('$file$');\n"
+            "goog.object.extend(proto, $alias$);\n",
+            "alias", ModuleAlias(*it), "file",
+            GetRootPath(std::string(file->name()), *it) +
+                GetJSFilename(options, *it));
+      }
     } else {
       printer->Print("var global = globalThis;\n\n");
-    }
 
-    for (int i = 0; i < file->dependency_count(); i++) {
-      const std::string name = std::string(file->dependency(i)->name());
-      printer->Print(
-          "var $alias$ = require('$file$');\n"
-          "goog.object.extend(proto, $alias$);\n",
-          "alias", ModuleAlias(name), "file",
-          GetRootPath(std::string(file->name()), name) + GetJSFilename(options, name));
+      for (int i = 0; i < file->dependency_count(); i++) {
+        const std::string name = std::string(file->dependency(i)->name());
+        printer->Print(
+            "var $alias$ = require('$file$');\n"
+            "goog.object.extend(proto, $alias$);\n",
+            "alias", ModuleAlias(name), "file",
+            GetRootPath(std::string(file->name()), name) + GetJSFilename(options, name));
+      }
     }
   } else if (options.import_style == GeneratorOptions::kImportEs6) {
     printer->Print("import * as jspb from 'google-protobuf';\n");
     printer->Print("var goog = jspb;\n");
     printer->Print("var proto = {};\n\n");
 
-    for (int i = 0; i < file->dependency_count(); i++) {
-      const std::string name = std::string(file->dependency(i)->name());
+    std::set<std::string> referenced_files =
+        CollectExtendedFiles(options, file);
+    for (std::set<std::string>::iterator it = referenced_files.begin();
+         it != referenced_files.end(); ++it) {
       printer->Print(
           "import * as $alias$ from '$file$';\n"
           "goog.object.extend(proto, $alias$);\n",
-          "alias", ModuleAlias(name), "file",
-          GetRootPath(std::string(file->name()), name) + GetJSFilename(options, name));
+          "alias", ModuleAlias(*it), "file",
+          GetRootPath(std::string(file->name()), *it) +
+              GetJSFilename(options, *it));
     }
   }
 

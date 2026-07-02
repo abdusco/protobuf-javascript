@@ -224,6 +224,22 @@ class Generator : public CodeGenerator {
                                 const FieldDescriptor* field,
                                 std::set<std::string>* required,
                                 std::set<std::string>* forwards) const;
+  // Collects the files of all message types referenced (directly or via
+  // nested/extension fields) by `desc`, other than `file` itself. Used by
+  // the commonjs_strict/es6 import styles, which populate a file-local
+  // `proto` object rather than a shared global one, so every file whose
+  // types are actually referenced must be extended into it -- not just
+  // this file's directly declared proto imports, which can miss types
+  // pulled in transitively (e.g. through google/protobuf/any.proto).
+  void FindReferencedFiles(const GeneratorOptions& options,
+                           const Descriptor* desc, const FileDescriptor* file,
+                           std::set<std::string>* referenced_files) const;
+  // Union of `file`'s declared proto imports and the files of every
+  // message type actually referenced (see FindReferencedFiles). This is
+  // the set of files commonjs_strict/es6 need to extend their file-local
+  // `proto` object from.
+  std::set<std::string> CollectExtendedFiles(const GeneratorOptions& options,
+                                             const FileDescriptor* file) const;
   // Generate all things in a proto file into one file.
   // If use_short_name is true, the generated file's name will only be short
   // name that without directory, otherwise filename equals file->name()
