@@ -183,6 +183,11 @@ class Generator : public CodeGenerator {
   void GenerateProvides(const GeneratorOptions& options, io::Printer* printer,
                         std::set<std::string>* provided) const;
 
+  // Print the ES6 `export const { ... } = proto;` statement for es6 import style.
+  void GenerateExports(const GeneratorOptions& options, io::Printer* printer,
+                       const FileDescriptor* file,
+                       std::set<std::string>* provided) const;
+
   // Generate goog.setTestOnly() if indicated.
   void GenerateTestOnly(const GeneratorOptions& options,
                         io::Printer* printer) const;
