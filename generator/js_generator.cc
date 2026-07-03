@@ -2293,6 +2293,8 @@ void Generator::GenerateClassToObject(const GeneratorOptions& options,
       "classname", GetMessagePath(options, desc));
 
   bool first = true;
+  printer->Indent();
+  printer->Indent();
   for (int i = 0; i < desc->field_count(); i++) {
     const FieldDescriptor* field = desc->field(i);
     if (IgnoreField(field)) {
@@ -2300,14 +2302,16 @@ void Generator::GenerateClassToObject(const GeneratorOptions& options,
     }
 
     if (!first) {
-      printer->Print(",\n    ");
+      printer->Print(",\n");
     } else {
-      printer->Print("\n    ");
+      printer->Print("\n");
       first = false;
     }
 
     GenerateClassFieldToObject(options, printer, field);
   }
+  printer->Outdent();
+  printer->Outdent();
 
   if (!first) {
     printer->Print("\n  };\n\n");
